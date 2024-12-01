@@ -122,7 +122,7 @@ public class awsTest {
 					stopInstance(instance_id);
 				break;
 
-			case 6: 
+			case 6:
 				System.out.print("Enter ami id: ");
 				String ami_id = "";
 				if(id_string.hasNext())
@@ -340,6 +340,10 @@ public class awsTest {
 			System.out.printf("[ImageID] %s, [Name] %s, [Owner] %s\n", 
 					images.getImageId(), images.getName(), images.getOwnerId());
 		}
+		
+	}
+
+	public static void Test() {
 		
 	}
 }
