@@ -1,5 +1,6 @@
 package aws;
 
+import java.util.ArrayList;
 /*
 * Cloud Computing
 * 
@@ -37,7 +38,11 @@ import com.amazonaws.services.ec2.model.Filter;
 
 public class awsTest {
 
-	static AmazonEC2      ec2;
+	private static AmazonEC2      ec2;
+	private static ArrayList<Instance> instanceList = new ArrayList<>();
+
+	private static final String STATE_RUNNING = "running";
+	private static final String STATE_STOP = "stopped";
 
 	private static void init() throws Exception {
 
@@ -53,20 +58,21 @@ public class awsTest {
 		}
 		ec2 = AmazonEC2ClientBuilder.standard()
 			.withCredentials(credentialsProvider)
-			.withRegion("us-east-1")	/* check the region at AWS console */
+			.withRegion("ap-southeast-2")	/* check the region at AWS console */
 			.build();
 	}
 
 	public static void main(String[] args) throws Exception {
 
 		init();
+		loadInstance();
 
 		Scanner menu = new Scanner(System.in);
-		Scanner id_string = new Scanner(System.in);
+		Scanner id_scanner = new Scanner(System.in);
 		int number = 0;
+		int instance_num = -1;
 		
-		while(true)
-		{
+		while(true) {
 			System.out.println("                                                            ");
 			System.out.println("                                                            ");
 			System.out.println("------------------------------------------------------------");
@@ -78,12 +84,11 @@ public class awsTest {
 			System.out.println("  7. reboot instance              8. list images            ");
 			System.out.println("                                 99. quit                   ");
 			System.out.println("------------------------------------------------------------");
-			
 			System.out.print("Enter an integer: ");
 			
-			if(menu.hasNextInt()){
+			if(menu.hasNextInt()) {
 				number = menu.nextInt();
-				}else {
+				} else {
 					System.out.println("concentration!");
 					break;
 				}
@@ -92,103 +97,99 @@ public class awsTest {
 			String instance_id = "";
 
 			switch(number) {
-			case 1: 
-				listInstances();
-				break;
-				
-			case 2: 
-				availableZones();
-				break;
-				
-			case 3: 
-				System.out.print("Enter instance id: ");
-				if(id_string.hasNext())
-					instance_id = id_string.nextLine();
-				
-				if(!instance_id.trim().isEmpty()) 
-					startInstance(instance_id);
-				break;
-
-			case 4: 
-				availableRegions();
-				break;
-
-			case 5: 
-				System.out.print("Enter instance id: ");
-				if(id_string.hasNext())
-					instance_id = id_string.nextLine();
-				
-				if(!instance_id.trim().isEmpty()) 
-					stopInstance(instance_id);
-				break;
-
-			case 6:
-				System.out.print("Enter ami id: ");
-				String ami_id = "";
-				if(id_string.hasNext())
-					ami_id = id_string.nextLine();
-				
-				if(!ami_id.trim().isEmpty()) 
-					createInstance(ami_id);
-				break;
-
-			case 7: 
-				System.out.print("Enter instance id: ");
-				if(id_string.hasNext())
-					instance_id = id_string.nextLine();
-				
-				if(!instance_id.trim().isEmpty()) 
-					rebootInstance(instance_id);
-				break;
-
-			case 8: 
-				listImages();
-				break;
-
-			case 99: 
-				System.out.println("bye!");
-				menu.close();
-				id_string.close();
-				return;
-			default: System.out.println("concentration!");
+				case 1: 
+					listInstances();
+					break;
+				case 2: 
+					availableZones();
+					break;
+				case 3: 
+					System.out.printf("Enter instance number[0-%d] : ", instanceList.size());
+					if(id_scanner.hasNextInt()) {
+						instance_num = id_scanner.nextInt();
+						startInstance(instance_num);
+					}
+					break;
+				case 4: 
+					availableRegions();
+					break;
+				case 5: 
+					System.out.print("Enter instance id: ");
+					if(id_scanner.hasNext())
+						instance_id = id_scanner.nextLine();
+					
+					if(!instance_id.trim().isEmpty()) 
+						stopInstance(instance_id);
+					break;
+				case 6:
+					System.out.print("Enter ami id: ");
+					String ami_id = "";
+					if(id_scanner.hasNext())
+						ami_id = id_scanner.nextLine();
+					
+					if(!ami_id.trim().isEmpty()) 
+						createInstance(ami_id);
+					break;
+				case 7: 
+					System.out.print("Enter instance id: ");
+					if(id_scanner.hasNext())
+						instance_id = id_scanner.nextLine();
+					
+					if(!instance_id.trim().isEmpty()) 
+						rebootInstance(instance_id);
+					break;
+				case 8: 
+					listImages();
+					break;
+				case 9:
+					break;
+				case 99: 
+					System.out.println("bye!");
+					menu.close();
+					id_scanner.close();
+					return;
+				default: 
+					System.out.println("concentration!");
 			}
-
 		}
-		
 	}
 
-	public static void listInstances() {
-		
-		System.out.println("Listing instances....");
+	public static void loadInstance() {
+		System.out.println("Loading Instances...");
 		boolean done = false;
-		
+
+		instanceList.clear();
+
 		DescribeInstancesRequest request = new DescribeInstancesRequest();
-		
+
 		while(!done) {
 			DescribeInstancesResult response = ec2.describeInstances(request);
 
 			for(Reservation reservation : response.getReservations()) {
-				for(Instance instance : reservation.getInstances()) {
-					System.out.printf(
-						"[id] %s, " +
-						"[AMI] %s, " +
-						"[type] %s, " +
-						"[state] %10s, " +
-						"[monitoring state] %s",
-						instance.getInstanceId(),
-						instance.getImageId(),
-						instance.getInstanceType(),
-						instance.getState().getName(),
-						instance.getMonitoring().getState());
-				}
-				System.out.println();
+				instanceList.addAll(reservation.getInstances());
 			}
 
 			request.setNextToken(response.getNextToken());
-
 			if(response.getNextToken() == null) {
 				done = true;
 			}
+		}
+
+		System.out.println("Loading Instances Done [Current Instances : " + instanceList.size() + "]");
+	}
+
+	public static void listInstances() {
+		System.out.println("Listing Instances...");
+		
+		for(int instance_idx = 0; instance_idx < instanceList.size(); instance_idx++) {
+			Instance instance = instanceList.get(i);
+			System.out.printf("[Instance %d], [id] %s, [state] %s, [type] %s, [AMI] %s, [monitoring state] %s\n",
+				instance_idx, 
+				instance.getInstanceId(), 
+				instance.getState().getName(), 
+				instance.getInstanceType(), 
+				instance.getImageId(), 
+				instance.getMonitoring().getState());
 		}
 	}
 	
@@ -216,6 +217,61 @@ public class awsTest {
 	
 	}
 
+	public static void startInstance(int instance_num) {
+		if(instance_num < 0 || instance_num >= instanceList.size()) {
+			System.out.println("Invalid Instance Number");
+			return;
+		}
+
+		Instance instance = instanceList.get(instance_num);
+		String instance_id = instance.getInstanceId();
+
+		if(!instance.getState().getName().equals(STATE_STOP)) {
+			System.out.printf("[Instance %s] Current State : %s\n", instance_id, instance.getState().getName());
+			return;
+		}
+
+		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
+		System.out.printf("Starting... %s\n", instance_id);
+
+		try {
+			StartInstancesRequest request = new StartInstancesRequest().withInstanceIds(instance_id);
+			ec2.startInstances(request);
+			
+			waitInstance(ec2, instance_id, STATE_RUNNING);
+			loadInstance();
+			
+			System.out.printf("Instance %s successfully started", instance_id);
+		} catch (Exception e) {
+			System.out.println("Exception : " + e.toString());
+		}
+		
+	}
+
+	private static void waitInstance(final AmazonEC2 ec2, String instance_id, String state) {
+		boolean done = false;
+
+		while(!done) {
+			try {
+				DescribeInstancesRequest request = new DescribeInstancesRequest().withInstanceIds(instance_id);
+				DescribeInstancesResult response = ec2.describeInstances(request);
+				
+				String currentState = response.getReservations().get(0).getInstances().get(0).getState().getName();
+				System.out.printf("[Instance %s] Current State : %s\n", instance_id, currentState);
+
+				if(currentState.equals(state)) {
+					done = true;
+				}
+				else {
+					Thread.sleep(1000);
+				}
+			} catch (Exception e) {
+				System.out.println("Exception : " + e.toString());
+				break;
+			}
+		}
+	}
+
 	public static void startInstance(String instance_id)
 	{
 		
@@ -237,7 +293,6 @@ public class awsTest {
 
 		System.out.printf("Successfully started instance %s", instance_id);
 	}
-	
 	
 	public static void availableRegions() {
 		
@@ -331,7 +386,7 @@ public class awsTest {
 		DescribeImagesRequest request = new DescribeImagesRequest();
 		ProfileCredentialsProvider credentialsProvider = new ProfileCredentialsProvider();
 		
-		request.getFilters().add(new Filter().withName("name").withValues("htcondor-slave-image"));
+		request.getFilters().add(new Filter().withName("owner-id").withValues("537124971887"));
 		request.setRequestCredentialsProvider(credentialsProvider);
 		
 		DescribeImagesResult results = ec2.describeImages(request);
@@ -344,7 +399,7 @@ public class awsTest {
 	}
 
 	public static void Test() {
-		
+
 	}
 }
 	
