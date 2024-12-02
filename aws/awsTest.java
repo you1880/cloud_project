@@ -104,7 +104,7 @@ public class awsTest {
 					availableZones();
 					break;
 				case 3: 
-					System.out.printf("Enter instance number[0-%d] : ", instanceList.size());
+					System.out.printf("Enter instance number[0-%d] : ", instanceList.size() - 1);
 					if(id_scanner.hasNextInt()) {
 						instance_num = id_scanner.nextInt();
 						startInstance(instance_num);
@@ -142,6 +142,11 @@ public class awsTest {
 					listImages();
 					break;
 				case 9:
+					System.out.printf("Enter instance number[0-%d] : ", instanceList.size() - 1);
+					if(id_scanner.hasNextInt()) {
+						instance_num = id_scanner.nextInt();
+						stopInstance(instance_num);
+					}
 					break;
 				case 99: 
 					System.out.println("bye!");
@@ -182,7 +187,7 @@ public class awsTest {
 		System.out.println("Listing Instances...");
 		
 		for(int instance_idx = 0; instance_idx < instanceList.size(); instance_idx++) {
-			Instance instance = instanceList.get(i);
+			Instance instance = instanceList.get(instance_idx);
 			System.out.printf("[Instance %d], [id] %s, [state] %s, [type] %s, [AMI] %s, [monitoring state] %s\n",
 				instance_idx, 
 				instance.getInstanceId(), 
@@ -245,7 +250,6 @@ public class awsTest {
 		} catch (Exception e) {
 			System.out.println("Exception : " + e.toString());
 		}
-		
 	}
 
 	private static void waitInstance(final AmazonEC2 ec2, String instance_id, String state) {
@@ -263,7 +267,7 @@ public class awsTest {
 					done = true;
 				}
 				else {
-					Thread.sleep(1000);
+					Thread.sleep(3000);
 				}
 			} catch (Exception e) {
 				System.out.println("Exception : " + e.toString());
@@ -272,8 +276,7 @@ public class awsTest {
 		}
 	}
 
-	public static void startInstance(String instance_id)
-	{
+	public static void startInstance(String instance_id) {
 		
 		System.out.printf("Starting .... %s\n", instance_id);
 		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
@@ -308,6 +311,36 @@ public class awsTest {
 				"[endpoint] %s\n",
 				region.getRegionName(),
 				region.getEndpoint());
+		}
+	}
+
+	public static void stopInstance(int instance_num) {
+		if(instance_num < 0 || instance_num >= instanceList.size()) {
+			System.out.println("Invalid Instance Number");
+			return;
+		}
+
+		Instance instance = instanceList.get(instance_num);
+		String instance_id = instance.getInstanceId();
+
+		if(!instance.getState().getName().equals(STATE_RUNNING)) {
+			System.out.printf("[Instance %s] Current State : %s\n", instance_id, instance.getState().getName());
+			return;
+		}
+
+		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
+		System.out.printf("Terminating Instance %s...\n", instance_id);
+
+		try {
+			StopInstancesRequest request = new StopInstancesRequest().withInstanceIds(instance_id);
+			ec2.stopInstances(request);
+			
+			waitInstance(ec2, instance_id, STATE_STOP);
+			loadInstance();
+			
+			System.out.printf("Instance %s successfully terminated", instance_id);
+		} catch (Exception e) {
+			System.out.println("Exception : " + e.toString());
 		}
 	}
 	
