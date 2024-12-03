@@ -1,6 +1,7 @@
 package aws;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 /*
 * Cloud Computing
 * 
@@ -10,6 +11,11 @@ import java.util.ArrayList;
 */
 import java.util.Iterator;
 import java.util.Scanner;
+import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.AmazonServiceException;
 import com.amazonaws.auth.profile.ProfileCredentialsProvider;
@@ -37,9 +43,11 @@ import com.amazonaws.services.ec2.model.Image;
 import com.amazonaws.services.ec2.model.Filter;
 
 public class awsTest {
-
 	private static AmazonEC2      ec2;
 	private static ArrayList<Instance> instanceList = new ArrayList<>();
+
+	private static final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+	private static Set<Integer> requestedInstances = new HashSet<Integer>();
 
 	private static final String STATE_RUNNING = "running";
 	private static final String STATE_STOP = "stopped";
@@ -65,7 +73,8 @@ public class awsTest {
 	public static void main(String[] args) throws Exception {
 
 		init();
-		loadInstance();
+		initInstanceList();
+		updateInstanceList();
 
 		Scanner menu = new Scanner(System.in);
 		Scanner id_scanner = new Scanner(System.in);
@@ -90,7 +99,7 @@ public class awsTest {
 				number = menu.nextInt();
 				} else {
 					System.out.println("concentration!");
-					break;
+					continue;
 				}
 			
 
@@ -114,12 +123,11 @@ public class awsTest {
 					availableRegions();
 					break;
 				case 5: 
-					System.out.print("Enter instance id: ");
-					if(id_scanner.hasNext())
-						instance_id = id_scanner.nextLine();
-					
-					if(!instance_id.trim().isEmpty()) 
-						stopInstance(instance_id);
+					System.out.printf("Enter instance number[0-%d] : ", instanceList.size() - 1);
+					if(id_scanner.hasNextInt()) {
+						instance_num = id_scanner.nextInt();
+						stopInstance(instance_num);
+					}
 					break;
 				case 6:
 					System.out.print("Enter ami id: ");
@@ -142,14 +150,10 @@ public class awsTest {
 					listImages();
 					break;
 				case 9:
-					System.out.printf("Enter instance number[0-%d] : ", instanceList.size() - 1);
-					if(id_scanner.hasNextInt()) {
-						instance_num = id_scanner.nextInt();
-						stopInstance(instance_num);
-					}
 					break;
 				case 99: 
 					System.out.println("bye!");
+					scheduler.shutdown();
 					menu.close();
 					id_scanner.close();
 					return;
@@ -159,7 +163,7 @@ public class awsTest {
 		}
 	}
 
-	public static void loadInstance() {
+	public static void initInstanceList() {
 		System.out.println("Loading Instances...");
 		boolean done = false;
 
@@ -183,6 +187,40 @@ public class awsTest {
 		System.out.println("Loading Instances Done [Current Instances : " + instanceList.size() + "]");
 	}
 
+	public static void updateInstanceList() {
+		Runnable updateTask = () -> {
+			if(!requestedInstances.isEmpty()) {
+				Iterator<Integer> iterator = requestedInstances.iterator();
+
+				while(iterator.hasNext()) {
+					int instance_num = iterator.next();
+					String instance_id = instanceList.get(instance_num).getInstanceId();
+
+					try {
+						DescribeInstancesRequest request = new DescribeInstancesRequest().withInstanceIds(instance_id);
+						DescribeInstancesResult response = ec2.describeInstances(request);
+
+						Instance instance = response.getReservations().get(0).getInstances().get(0);
+						String instanceState = instance.getState().getName();
+
+						if(instanceState.equals("pending") || instanceState.equals("stopping")) {
+							continue;
+						} 
+						else {
+							synchronized(instanceList) {
+								instanceList.set(instance_num, instance);
+							}
+							iterator.remove();
+						}
+					} catch (Exception e) {
+						System.out.println("Error : " + e.toString());
+					}
+				}
+			}
+		};
+		scheduler.scheduleAtFixedRate(updateTask, 0, 1, TimeUnit.SECONDS);
+	}
+
 	public static void listInstances() {
 		System.out.println("Listing Instances...");
 		
@@ -199,8 +237,8 @@ public class awsTest {
 	}
 	
 	public static void availableZones()	{
-
 		System.out.println("Available zones....");
+
 		try {
 			DescribeAvailabilityZonesResult availabilityZonesResult = ec2.describeAvailabilityZones();
 			Iterator <AvailabilityZone> iterator = availabilityZonesResult.getAvailabilityZones().iterator();
@@ -210,16 +248,13 @@ public class awsTest {
 				zone = iterator.next();
 				System.out.printf("[id] %s,  [region] %15s, [zone] %15s\n", zone.getZoneId(), zone.getRegionName(), zone.getZoneName());
 			}
-			System.out.println("You have access to " + availabilityZonesResult.getAvailabilityZones().size() +
-					" Availability Zones.");
-
+			System.out.println("You have access to " + availabilityZonesResult.getAvailabilityZones().size() + " Availability Zones.");
 		} catch (AmazonServiceException ase) {
-				System.out.println("Caught Exception: " + ase.getMessage());
-				System.out.println("Reponse Status Code: " + ase.getStatusCode());
-				System.out.println("Error Code: " + ase.getErrorCode());
-				System.out.println("Request ID: " + ase.getRequestId());
+			System.out.println("Caught Exception: " + ase.getMessage());
+			System.out.println("Reponse Status Code: " + ase.getStatusCode());
+			System.out.println("Error Code: " + ase.getErrorCode());
+			System.out.println("Request ID: " + ase.getRequestId());
 		}
-	
 	}
 
 	public static void startInstance(int instance_num) {
@@ -236,43 +271,23 @@ public class awsTest {
 			return;
 		}
 
+		if(requestedInstances.contains(instance_num)) {
+			System.out.printf("Instance %s already in queue\n", instance_id);
+			return;
+		}
+
 		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
 		System.out.printf("Starting... %s\n", instance_id);
 
 		try {
 			StartInstancesRequest request = new StartInstancesRequest().withInstanceIds(instance_id);
 			ec2.startInstances(request);
-			
-			waitInstance(ec2, instance_id, STATE_RUNNING);
-			loadInstance();
-			
+
+			requestedInstances.add(instance_num);
+
 			System.out.printf("Instance %s successfully started", instance_id);
 		} catch (Exception e) {
 			System.out.println("Exception : " + e.toString());
-		}
-	}
-
-	private static void waitInstance(final AmazonEC2 ec2, String instance_id, String state) {
-		boolean done = false;
-
-		while(!done) {
-			try {
-				DescribeInstancesRequest request = new DescribeInstancesRequest().withInstanceIds(instance_id);
-				DescribeInstancesResult response = ec2.describeInstances(request);
-				
-				String currentState = response.getReservations().get(0).getInstances().get(0).getState().getName();
-				System.out.printf("[Instance %s] Current State : %s\n", instance_id, currentState);
-
-				if(currentState.equals(state)) {
-					done = true;
-				}
-				else {
-					Thread.sleep(3000);
-				}
-			} catch (Exception e) {
-				System.out.println("Exception : " + e.toString());
-				break;
-			}
 		}
 	}
 
@@ -298,11 +313,9 @@ public class awsTest {
 	}
 	
 	public static void availableRegions() {
-		
 		System.out.println("Available regions ....");
 		
 		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
-
 		DescribeRegionsResult regions_response = ec2.describeRegions();
 
 		for(Region region : regions_response.getRegions()) {
@@ -328,17 +341,21 @@ public class awsTest {
 			return;
 		}
 
+		if(requestedInstances.contains(instance_num)) {
+			System.out.printf("Instance %s already in queue\n", instance_id);
+			return;
+		}
+
 		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
-		System.out.printf("Terminating Instance %s...\n", instance_id);
+		System.out.printf("Stop Instance %s...\n", instance_id);
 
 		try {
 			StopInstancesRequest request = new StopInstancesRequest().withInstanceIds(instance_id);
 			ec2.stopInstances(request);
 			
-			waitInstance(ec2, instance_id, STATE_STOP);
-			loadInstance();
-			
-			System.out.printf("Instance %s successfully terminated", instance_id);
+			requestedInstances.add(instance_num);
+
+			System.out.printf("Instance %s successfully stopped", instance_id);
 		} catch (Exception e) {
 			System.out.println("Exception : " + e.toString());
 		}
@@ -430,9 +447,4 @@ public class awsTest {
 		}
 		
 	}
-
-	public static void Test() {
-
-	}
 }
-	
