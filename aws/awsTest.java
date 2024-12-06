@@ -1,7 +1,4 @@
 package aws;
-
-import java.util.ArrayList;
-import java.util.HashSet;
 /*
 * Cloud Computing
 * 
@@ -9,6 +6,9 @@ import java.util.HashSet;
 * using AWS Java SDK Library
 * 
 */
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Scanner;
 import java.util.Set;
@@ -29,8 +29,15 @@ import com.amazonaws.services.ec2.model.DescribeInstancesRequest;
 import com.amazonaws.services.ec2.model.DescribeRegionsResult;
 import com.amazonaws.services.ec2.model.Region;
 import com.amazonaws.services.ec2.model.AvailabilityZone;
-import com.amazonaws.services.ec2.model.DryRunSupportedRequest;
+import com.amazonaws.services.ec2.model.CreateTagsRequest;
 import com.amazonaws.services.ec2.model.StopInstancesRequest;
+import com.amazonaws.services.ec2.model.Tag;
+import com.amazonaws.services.simplesystemsmanagement.AWSSimpleSystemsManagement;
+import com.amazonaws.services.simplesystemsmanagement.AWSSimpleSystemsManagementClientBuilder;
+import com.amazonaws.services.simplesystemsmanagement.model.GetCommandInvocationRequest;
+import com.amazonaws.services.simplesystemsmanagement.model.GetCommandInvocationResult;
+import com.amazonaws.services.simplesystemsmanagement.model.SendCommandRequest;
+import com.amazonaws.services.simplesystemsmanagement.model.SendCommandResult;
 import com.amazonaws.services.ec2.model.StartInstancesRequest;
 import com.amazonaws.services.ec2.model.InstanceType;
 import com.amazonaws.services.ec2.model.RunInstancesRequest;
@@ -51,6 +58,8 @@ public class awsTest {
 
 	private static final String STATE_RUNNING = "running";
 	private static final String STATE_STOP = "stopped";
+	private static final String STATE_PENDING = "pending";
+	private static final String STATE_STOPPING = "stopping";
 
 	private static void init() throws Exception {
 
@@ -77,9 +86,9 @@ public class awsTest {
 		updateInstanceList();
 
 		Scanner menu = new Scanner(System.in);
-		Scanner id_scanner = new Scanner(System.in);
+		Scanner idScanner = new Scanner(System.in);
+		Scanner nameScanner = new Scanner(System.in);
 		int number = 0;
-		int instance_num = -1;
 		
 		while(true) {
 			System.out.println("                                                            ");
@@ -91,7 +100,7 @@ public class awsTest {
 			System.out.println("  3. start instance               4. available regions      ");
 			System.out.println("  5. stop instance                6. create instance        ");
 			System.out.println("  7. reboot instance              8. list images            ");
-			System.out.println("                                 99. quit                   ");
+			System.out.println("  9. condor status                99. quit                  ");
 			System.out.println("------------------------------------------------------------");
 			System.out.print("Enter an integer: ");
 			
@@ -103,7 +112,7 @@ public class awsTest {
 				}
 			
 
-			String instance_id = "";
+			int instanceNum = -1;
 
 			switch(number) {
 				case 1: 
@@ -114,9 +123,9 @@ public class awsTest {
 					break;
 				case 3: 
 					System.out.printf("Enter instance number[0-%d] : ", instanceList.size() - 1);
-					if(id_scanner.hasNextInt()) {
-						instance_num = id_scanner.nextInt();
-						startInstance(instance_num);
+					if(idScanner.hasNextInt()) {
+						instanceNum = idScanner.nextInt();
+						startInstance(instanceNum);
 					}
 					break;
 				case 4: 
@@ -124,38 +133,44 @@ public class awsTest {
 					break;
 				case 5: 
 					System.out.printf("Enter instance number[0-%d] : ", instanceList.size() - 1);
-					if(id_scanner.hasNextInt()) {
-						instance_num = id_scanner.nextInt();
-						stopInstance(instance_num);
+					if(idScanner.hasNextInt()) {
+						instanceNum = idScanner.nextInt();
+						stopInstance(instanceNum);
 					}
 					break;
 				case 6:
 					System.out.print("Enter ami id: ");
-					String ami_id = "";
-					if(id_scanner.hasNext())
-						ami_id = id_scanner.nextLine();
+					String amiId = "";
+					if(idScanner.hasNext())
+						amiId = idScanner.nextLine();
 					
-					if(!ami_id.trim().isEmpty()) 
-						createInstance(ami_id);
+					System.out.print("Enter instance name : ");
+					String instanceName = "";
+					if(nameScanner.hasNext())
+						instanceName = nameScanner.nextLine();
+					
+					if(!amiId.trim().isEmpty() && !instanceName.trim().isEmpty())
+						createInstance(amiId, instanceName);
 					break;
 				case 7: 
-					System.out.print("Enter instance id: ");
-					if(id_scanner.hasNext())
-						instance_id = id_scanner.nextLine();
-					
-					if(!instance_id.trim().isEmpty()) 
-						rebootInstance(instance_id);
+					System.out.printf("Enter instance number[0-%d] : ", instanceList.size() - 1);
+					if(idScanner.hasNextInt()) {
+						instanceNum = idScanner.nextInt();
+						rebootInstance(instanceNum);
+					}
 					break;
 				case 8: 
 					listImages();
 					break;
 				case 9:
+					execCondorStatus();
 					break;
 				case 99: 
 					System.out.println("bye!");
 					scheduler.shutdown();
 					menu.close();
-					id_scanner.close();
+					idScanner.close();
+					nameScanner.close();
 					return;
 				default: 
 					System.out.println("concentration!");
@@ -166,6 +181,7 @@ public class awsTest {
 	public static void initInstanceList() {
 		System.out.println("Loading Instances...");
 		boolean done = false;
+		int index = 0;
 
 		instanceList.clear();
 
@@ -175,7 +191,17 @@ public class awsTest {
 			DescribeInstancesResult response = ec2.describeInstances(request);
 
 			for(Reservation reservation : response.getReservations()) {
-				instanceList.addAll(reservation.getInstances());
+				for(Instance instance : reservation.getInstances()) {
+					String state = instance.getState().getName();
+
+					if(state.equals(STATE_PENDING) || state.equals(STATE_STOPPING)) {
+						System.out.println("STATE ABNORMAL " + index);
+						requestedInstances.add(index);
+					}
+
+					instanceList.add(instance);
+					index++;
+				}
 			}
 
 			request.setNextToken(response.getNextToken());
@@ -203,7 +229,7 @@ public class awsTest {
 						Instance instance = response.getReservations().get(0).getInstances().get(0);
 						String instanceState = instance.getState().getName();
 
-						if(instanceState.equals("pending") || instanceState.equals("stopping")) {
+						if(instanceState.equals(STATE_PENDING) || instanceState.equals(STATE_STOPPING)) {
 							continue;
 						} 
 						else {
@@ -290,27 +316,6 @@ public class awsTest {
 			System.out.println("Exception : " + e.toString());
 		}
 	}
-
-	public static void startInstance(String instance_id) {
-		
-		System.out.printf("Starting .... %s\n", instance_id);
-		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
-
-		DryRunSupportedRequest<StartInstancesRequest> dry_request =
-			() -> {
-			StartInstancesRequest request = new StartInstancesRequest()
-				.withInstanceIds(instance_id);
-
-			return request.getDryRunRequest();
-		};
-
-		StartInstancesRequest request = new StartInstancesRequest()
-			.withInstanceIds(instance_id);
-
-		ec2.startInstances(request);
-
-		System.out.printf("Successfully started instance %s", instance_id);
-	}
 	
 	public static void availableRegions() {
 		System.out.println("Available regions ....");
@@ -361,73 +366,61 @@ public class awsTest {
 		}
 	}
 	
-	public static void stopInstance(String instance_id) {
+	public static void createInstance(String ami_id, String instance_name) {
 		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
-
-		DryRunSupportedRequest<StopInstancesRequest> dry_request =
-			() -> {
-			StopInstancesRequest request = new StopInstancesRequest()
-				.withInstanceIds(instance_id);
-
-			return request.getDryRunRequest();
-		};
+		final String securityGroupName = "HTCondor";
+		final String keyName = "cloud-key";
 
 		try {
-			StopInstancesRequest request = new StopInstancesRequest()
-				.withInstanceIds(instance_id);
-	
-			ec2.stopInstances(request);
-			System.out.printf("Successfully stop instance %s\n", instance_id);
-
-		} catch(Exception e)
-		{
-			System.out.println("Exception: "+e.toString());
-		}
-
-	}
-	
-	public static void createInstance(String ami_id) {
-		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
-		
-		RunInstancesRequest run_request = new RunInstancesRequest()
+			RunInstancesRequest run_request = new RunInstancesRequest()
 			.withImageId(ami_id)
 			.withInstanceType(InstanceType.T2Micro)
 			.withMaxCount(1)
-			.withMinCount(1);
+			.withMinCount(1)
+			.withSecurityGroups(securityGroupName)
+			.withKeyName(keyName);
 
-		RunInstancesResult run_response = ec2.runInstances(run_request);
+			RunInstancesResult run_response = ec2.runInstances(run_request);
+			String reservation_id = run_response.getReservation().getInstances().get(0).getInstanceId();
 
-		String reservation_id = run_response.getReservation().getInstances().get(0).getInstanceId();
+			Tag tag = new Tag().withKey("Name").withValue(instance_name);
+			CreateTagsRequest createTagsRequest = new CreateTagsRequest().withResources(reservation_id).withTags(tag);
+			ec2.createTags(createTagsRequest);
+			initInstanceList();
 
-		System.out.printf(
-			"Successfully started EC2 instance %s based on AMI %s",
-			reservation_id, ami_id);
-	
+			System.out.printf("Successfully Started EC2 instance %s with AMI %s\n", reservation_id, ami_id);
+		} catch(Exception e) {
+			System.out.println("Exception : " + e.toString());
+		}
 	}
 
-	public static void rebootInstance(String instance_id) {
-		
-		System.out.printf("Rebooting .... %s\n", instance_id);
-		
-		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
-
-		try {
-			RebootInstancesRequest request = new RebootInstancesRequest()
-					.withInstanceIds(instance_id);
-
-				RebootInstancesResult response = ec2.rebootInstances(request);
-
-				System.out.printf(
-						"Successfully rebooted instance %s", instance_id);
-
-		} catch(Exception e)
-		{
-			System.out.println("Exception: "+e.toString());
+	public static void rebootInstance(int instance_num) {
+		if(instance_num < 0 || instance_num >= instanceList.size()) {
+			System.out.println("Invalid Instance Number");
+			return;
 		}
 
-		
+		Instance instance = instanceList.get(instance_num);
+		String instance_id = instance.getInstanceId();
+
+		if(!instance.getState().getName().equals(STATE_RUNNING)) {
+			System.out.printf("[Instance %s] Current State : %s\n", instance_id, instance.getState().getName());
+			return;
+		}
+
+		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
+		System.out.printf("Rebooting Instance %s...\n", instance_id);
+
+		try {
+			RebootInstancesRequest request = new RebootInstancesRequest().withInstanceIds(instance_id);
+			RebootInstancesResult response = ec2.rebootInstances(request);
+
+			System.out.printf("Successfully rebooted instance %s", instance_id);
+		} catch (Exception e) {
+			System.out.println("Exception : " + e.toString());
+		}
 	}
-	
+
 	public static void listImages() {
 		System.out.println("Listing images....");
 		
@@ -445,6 +438,42 @@ public class awsTest {
 			System.out.printf("[ImageID] %s, [Name] %s, [Owner] %s\n", 
 					images.getImageId(), images.getName(), images.getOwnerId());
 		}
-		
+	}
+
+	public static void execCondorStatus() {
+		String command = "condor_status";
+		String masterInstanceId = "i-0a2be53e6aa659aaa";
+		AWSSimpleSystemsManagement ssmClient = AWSSimpleSystemsManagementClientBuilder.defaultClient();
+
+		try {
+			SendCommandRequest sendCommandRequest = new SendCommandRequest()
+				.withInstanceIds(masterInstanceId)
+				.withDocumentName("AWS-RunShellScript")
+				.addParametersEntry("commands", Collections.singletonList(command));
+
+			SendCommandResult sendCommandResult = ssmClient.sendCommand(sendCommandRequest);
+			String commandId = sendCommandResult.getCommand().getCommandId();
+			
+			GetCommandInvocationRequest invocationRequest = new GetCommandInvocationRequest()
+				.withCommandId(commandId)
+				.withInstanceId(masterInstanceId);
+			
+			GetCommandInvocationResult invocationResult;
+			while(true) {
+				invocationResult = ssmClient.getCommandInvocation(invocationRequest);
+				String status = invocationResult.getStatus();
+
+				if(status.equals("InProgress")) {
+					Thread.sleep(1000);
+				}
+				else {
+                    break;
+				}
+			}
+
+			System.out.println("Command Output: " + invocationResult.getStandardOutputContent());
+		} catch(Exception e) {
+			System.out.println("Exception : " + e.toString());
+		}
 	}
 }
