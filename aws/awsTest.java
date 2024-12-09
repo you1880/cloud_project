@@ -139,7 +139,7 @@ public class awsTest {
 					}
 					break;
 				case 6:
-					System.out.print("Enter ami id: ");
+					System.out.print("Enter ami Name: ");
 					String amiId = "";
 					if(idScanner.hasNext())
 						amiId = idScanner.nextLine();
@@ -174,6 +174,7 @@ public class awsTest {
 					return;
 				default: 
 					System.out.println("concentration!");
+					continue;
 			}
 		}
 	}
@@ -195,7 +196,6 @@ public class awsTest {
 					String state = instance.getState().getName();
 
 					if(state.equals(STATE_PENDING) || state.equals(STATE_STOPPING)) {
-						System.out.println("STATE ABNORMAL " + index);
 						requestedInstances.add(index);
 					}
 
@@ -219,11 +219,11 @@ public class awsTest {
 				Iterator<Integer> iterator = requestedInstances.iterator();
 
 				while(iterator.hasNext()) {
-					int instance_num = iterator.next();
-					String instance_id = instanceList.get(instance_num).getInstanceId();
+					int instanceNum = iterator.next();
+					String instanceId = instanceList.get(instanceNum).getInstanceId();
 
 					try {
-						DescribeInstancesRequest request = new DescribeInstancesRequest().withInstanceIds(instance_id);
+						DescribeInstancesRequest request = new DescribeInstancesRequest().withInstanceIds(instanceId);
 						DescribeInstancesResult response = ec2.describeInstances(request);
 
 						Instance instance = response.getReservations().get(0).getInstances().get(0);
@@ -234,7 +234,7 @@ public class awsTest {
 						} 
 						else {
 							synchronized(instanceList) {
-								instanceList.set(instance_num, instance);
+								instanceList.set(instanceNum, instance);
 							}
 							iterator.remove();
 						}
@@ -250,10 +250,10 @@ public class awsTest {
 	public static void listInstances() {
 		System.out.println("Listing Instances...");
 		
-		for(int instance_idx = 0; instance_idx < instanceList.size(); instance_idx++) {
-			Instance instance = instanceList.get(instance_idx);
+		for(int idx = 0; idx < instanceList.size(); idx++) {
+			Instance instance = instanceList.get(idx);
 			System.out.printf("[Instance %d], [id] %s, [state] %s, [type] %s, [AMI] %s, [monitoring state] %s\n",
-				instance_idx, 
+				idx, 
 				instance.getInstanceId(), 
 				instance.getState().getName(), 
 				instance.getInstanceType(), 
@@ -283,35 +283,35 @@ public class awsTest {
 		}
 	}
 
-	public static void startInstance(int instance_num) {
-		if(instance_num < 0 || instance_num >= instanceList.size()) {
+	public static void startInstance(int instanceNum) {
+		if(instanceNum < 0 || instanceNum >= instanceList.size()) {
 			System.out.println("Invalid Instance Number");
 			return;
 		}
 
-		Instance instance = instanceList.get(instance_num);
-		String instance_id = instance.getInstanceId();
+		Instance instance = instanceList.get(instanceNum);
+		String instanceId = instance.getInstanceId();
 
-		if(!instance.getState().getName().equals(STATE_STOP)) {
-			System.out.printf("[Instance %s] Current State : %s\n", instance_id, instance.getState().getName());
+		if(requestedInstances.contains(instanceNum)) {
+			System.out.printf("Instance %s already in queue\n", instanceId);
 			return;
 		}
 
-		if(requestedInstances.contains(instance_num)) {
-			System.out.printf("Instance %s already in queue\n", instance_id);
+		if(!instance.getState().getName().equals(STATE_STOP)) {
+			System.out.printf("[Instance %s] Current State : %s\n", instanceId, instance.getState().getName());
 			return;
 		}
 
 		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
-		System.out.printf("Starting... %s\n", instance_id);
+		System.out.printf("Starting... %s\n", instanceId);
 
 		try {
-			StartInstancesRequest request = new StartInstancesRequest().withInstanceIds(instance_id);
+			StartInstancesRequest request = new StartInstancesRequest().withInstanceIds(instanceId);
 			ec2.startInstances(request);
 
-			requestedInstances.add(instance_num);
+			requestedInstances.add(instanceNum);
 
-			System.out.printf("Instance %s successfully started", instance_id);
+			System.out.printf("Instance %s successfully started", instanceId);
 		} catch (Exception e) {
 			System.out.println("Exception : " + e.toString());
 		}
@@ -321,9 +321,9 @@ public class awsTest {
 		System.out.println("Available regions ....");
 		
 		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
-		DescribeRegionsResult regions_response = ec2.describeRegions();
+		DescribeRegionsResult regionsResponse = ec2.describeRegions();
 
-		for(Region region : regions_response.getRegions()) {
+		for(Region region : regionsResponse.getRegions()) {
 			System.out.printf(
 				"[region] %15s, " +
 				"[endpoint] %s\n",
@@ -332,90 +332,120 @@ public class awsTest {
 		}
 	}
 
-	public static void stopInstance(int instance_num) {
-		if(instance_num < 0 || instance_num >= instanceList.size()) {
+	public static void stopInstance(int instanceNum) {
+		if(instanceNum < 0 || instanceNum >= instanceList.size()) {
 			System.out.println("Invalid Instance Number");
 			return;
 		}
 
-		Instance instance = instanceList.get(instance_num);
-		String instance_id = instance.getInstanceId();
+		Instance instance = instanceList.get(instanceNum);
+		String instanceId = instance.getInstanceId();
 
-		if(!instance.getState().getName().equals(STATE_RUNNING)) {
-			System.out.printf("[Instance %s] Current State : %s\n", instance_id, instance.getState().getName());
+		if(requestedInstances.contains(instanceNum)) {
+			System.out.printf("Instance %s already in queue\n", instanceId);
 			return;
 		}
 
-		if(requestedInstances.contains(instance_num)) {
-			System.out.printf("Instance %s already in queue\n", instance_id);
+		if(!instance.getState().getName().equals(STATE_RUNNING)) {
+			System.out.printf("[Instance %s] Current State : %s\n", instanceId, instance.getState().getName());
 			return;
 		}
 
 		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
-		System.out.printf("Stop Instance %s...\n", instance_id);
+		System.out.printf("Stop Instance %s...\n", instanceId);
 
 		try {
-			StopInstancesRequest request = new StopInstancesRequest().withInstanceIds(instance_id);
+			StopInstancesRequest request = new StopInstancesRequest().withInstanceIds(instanceId);
 			ec2.stopInstances(request);
 			
-			requestedInstances.add(instance_num);
+			requestedInstances.add(instanceNum);
 
-			System.out.printf("Instance %s successfully stopped", instance_id);
+			System.out.printf("Instance %s successfully stopped", instanceId);
 		} catch (Exception e) {
 			System.out.println("Exception : " + e.toString());
 		}
 	}
 	
-	public static void createInstance(String ami_id, String instance_name) {
+	public static void createInstance(String amiName, String instanceName) {
 		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
 		final String securityGroupName = "HTCondor";
 		final String keyName = "cloud-key";
 
+		String amiId = getImageId(amiName);
+		if(amiId == null) {
+			System.out.println("Invalid AMI name\n");
+			return;
+		}
 		try {
-			RunInstancesRequest run_request = new RunInstancesRequest()
-			.withImageId(ami_id)
+			RunInstancesRequest runRequest = new RunInstancesRequest()
+			.withImageId(amiId)
 			.withInstanceType(InstanceType.T2Micro)
 			.withMaxCount(1)
 			.withMinCount(1)
 			.withSecurityGroups(securityGroupName)
 			.withKeyName(keyName);
 
-			RunInstancesResult run_response = ec2.runInstances(run_request);
-			String reservation_id = run_response.getReservation().getInstances().get(0).getInstanceId();
+			RunInstancesResult runResponse = ec2.runInstances(runRequest);
+			String reservationId = runResponse.getReservation().getInstances().get(0).getInstanceId();
 
-			Tag tag = new Tag().withKey("Name").withValue(instance_name);
-			CreateTagsRequest createTagsRequest = new CreateTagsRequest().withResources(reservation_id).withTags(tag);
+			Tag tag = new Tag().withKey("Name").withValue(instanceName);
+			CreateTagsRequest createTagsRequest = new CreateTagsRequest().withResources(reservationId).withTags(tag);
 			ec2.createTags(createTagsRequest);
+			
+			Thread.sleep(2000);
+			System.out.printf("Successfully Started EC2 instance %s with AMI %s\n", reservationId, amiId);
 			initInstanceList();
-
-			System.out.printf("Successfully Started EC2 instance %s with AMI %s\n", reservation_id, ami_id);
 		} catch(Exception e) {
 			System.out.println("Exception : " + e.toString());
 		}
 	}
+	
+	private static String getImageId(String amiName) {
+		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
+		
+		try {
+			DescribeImagesRequest request = new DescribeImagesRequest();
+			ProfileCredentialsProvider credentialsProvider = new ProfileCredentialsProvider();
 
-	public static void rebootInstance(int instance_num) {
-		if(instance_num < 0 || instance_num >= instanceList.size()) {
+			request.getFilters().add(new Filter().withName("owner-id").withValues("537124971887"));
+			request.setRequestCredentialsProvider(credentialsProvider);
+
+			DescribeImagesResult result = ec2.describeImages(request);
+
+			for(Image images : result.getImages()) {
+				if(amiName.equals(images.getName())) {
+					return images.getImageId();
+				}
+			}
+		} catch (Exception e) {
+			System.out.println("Exception : " + e.toString());
+		}
+
+		return null;
+	}
+
+	public static void rebootInstance(int instanceNum) {
+		if(instanceNum < 0 || instanceNum >= instanceList.size()) {
 			System.out.println("Invalid Instance Number");
 			return;
 		}
 
-		Instance instance = instanceList.get(instance_num);
-		String instance_id = instance.getInstanceId();
+		Instance instance = instanceList.get(instanceNum);
+		String instanceId = instance.getInstanceId();
 
 		if(!instance.getState().getName().equals(STATE_RUNNING)) {
-			System.out.printf("[Instance %s] Current State : %s\n", instance_id, instance.getState().getName());
+			System.out.printf("[Instance %s] Current State : %s\n", instanceId, instance.getState().getName());
 			return;
 		}
 
 		final AmazonEC2 ec2 = AmazonEC2ClientBuilder.defaultClient();
-		System.out.printf("Rebooting Instance %s...\n", instance_id);
+		System.out.printf("Rebooting Instance %s...\n", instanceId);
 
 		try {
-			RebootInstancesRequest request = new RebootInstancesRequest().withInstanceIds(instance_id);
+			RebootInstancesRequest request = new RebootInstancesRequest().withInstanceIds(instanceId);
 			RebootInstancesResult response = ec2.rebootInstances(request);
 
-			System.out.printf("Successfully rebooted instance %s", instance_id);
+			System.out.printf("Successfully rebooted instance %s", instanceId);
 		} catch (Exception e) {
 			System.out.println("Exception : " + e.toString());
 		}
